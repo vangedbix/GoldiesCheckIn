@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#123a63">
+<title>AI Goldies Check-In</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{--navy:#123a63;--blue:#1769aa;--green:#14866d;--red:#c62828;--orange:#c77700;--bg:#f4f7fb;--card:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Arial,sans-serif;color:#17324d}main{max-width:560px;margin:auto;padding:18px 14px 35px}.header{background:var(--navy);color:white;border-radius:18px;padding:22px 18px;text-align:center;box-shadow:0 4px 14px #0002}.header h1{margin:0;font-size:25px}.header p{margin:7px 0 0;font-size:14px;opacity:.9}.card{background:var(--card);border-radius:18px;padding:18px;margin-top:14px;box-shadow:0 2px 10px #0001}button,input{width:100%;min-height:52px;border-radius:12px;font-size:18px}button{border:0;background:var(--blue);color:white;font-weight:700;padding:12px;margin-top:10px}button.secondary{background:#e7edf4;color:#17324d}button.success{background:var(--green)}button.danger{background:var(--red)}button:disabled{opacity:.5}input{border:2px solid #cbd6e2;padding:12px;margin-top:8px;text-transform:uppercase}label{display:block;font-weight:700;margin-top:10px}.hint{font-size:13px;color:#607589}.hidden{display:none!important}.reader{margin-top:12px;border-radius:14px;overflow:hidden}.result{margin-top:14px;padding:16px;border-radius:14px;font-size:16px}.valid{background:#e7f7f1;border:1px solid #86d7bf}.invalid{background:#fdecec;border:1px solid #efaaaa}.warning{background:#fff4df;border:1px solid #e8bd72}.result h2{margin:0 0 10px;font-size:20px}.row{display:flex;justify-content:space-between;gap:15px;padding:6px 0;border-bottom:1px solid #0001}.row:last-child{border-bottom:0}.value{font-weight:700;text-align:right}.small{font-size:12px;color:#718397;margin-top:12px;text-align:center}.spinner{display:inline-block;width:18px;height:18px;border:3px solid #fff8;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;vertical-align:-3px;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<main>
+<section class="header"><h1>AI GOLDIES CHECK-IN</h1><p>Scan participant QR code or enter Registration ID</p></section>
+<section class="card">
+<button id="scanBtn">📷 SCAN QR CODE</button>
+<div id="reader" class="reader hidden"></div>
+<button id="stopBtn" class="secondary hidden">STOP CAMERA</button>
+</section>
+<section class="card">
+<label for="regId">Registration ID</label>
+<input id="regId" placeholder="e.g. GO-0001" autocomplete="off" autocapitalize="characters">
+<button id="lookupBtn">CHECK PARTICIPANT</button>
+<div id="result"></div>
+</section>
+<p class="small">For event staff only • Check-in is recorded in the Google Sheet</p>
+</main>
+<script>
+/* ===================== CONFIG =====================
+   1. Paste your deployed Google Apps Script Web App URL below.
+   2. Put the same CHECKIN_KEY in your Google Sheet CONFIG sheet.
+*/
+const API_URL = 'https://script.google.com/macros/s/AKfycbwsYnCDEuoQ53fNUST1EeJgvyBEAUseUjNpRHHceiOHeZFM-_iPYypEi7OU4Qx9wZe-4Q/exec';
+const CHECKIN_KEY = 'Goldies2026_KK_CheckIn_8F7mQ2';
+const STAFF_NAME = 'SCS Check-in Counter';
+
+const regInput=document.getElementById('regId'), result=document.getElementById('result');
+const scanBtn=document.getElementById('scanBtn'), stopBtn=document.getElementById('stopBtn'), reader=document.getElementById('reader');
+const lookupBtn=document.getElementById('lookupBtn');
+let qrScanner=null, busy=false;
+
+function showResult(type,title,message,p,allowCheckin){
+  let html=`<div class="result ${type}"><h2>${title}</h2><p>${message}</p>`;
+  if(p){html+=`<div class="row"><span>Registration ID</span><span class="value">${esc(p.registrationId)}</span></div><div class="row"><span>Name</span><span class="value">${esc(p.fullName)}</span></div><div class="row"><span>Status</span><span class="value">${esc(p.status)}</span></div>`;
+    if(p.checkInStatus) html+=`<div class="row"><span>Check-in</span><span class="value">${esc(p.checkInStatus)}</span></div>`;
+    if(p.checkInTime) html+=`<div class="row"><span>Time</span><span class="value">${esc(formatDate(p.checkInTime))}</span></div>`;
+  }
+  if(allowCheckin) html+=`<button class="success" id="confirmBtn">✓ CHECK IN THIS PARTICIPANT</button>`;
+  html+='</div>'; result.innerHTML=html;
+  const b=document.getElementById('confirmBtn'); if(b)b.onclick=()=>checkIn(p.registrationId);
+}
+function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function formatDate(s){try{return new Date(s).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}catch(e){return s}}
+function validateConfig(){if(!API_URL||API_URL.includes('PASTE_')||!CHECKIN_KEY||CHECKIN_KEY==='CHANGE_THIS_KEY'){showResult('warning','⚠ SETUP REQUIRED','Please enter your Apps Script Web App URL and CHECKIN_KEY in index.html first.');return false}return true}
+function jsonp(params){return new Promise((resolve,reject)=>{const cb='checkInCb_'+Date.now()+'_'+Math.floor(Math.random()*10000);const script=document.createElement('script');const timer=setTimeout(()=>{cleanup();reject(new Error('Google Apps Script did not respond. Please check that the Web App is deployed as Execute as: Me and Who has access: Anyone.'))},20000);function cleanup(){clearTimeout(timer);delete window[cb];script.remove()}window[cb]=data=>{cleanup();resolve(data)};params.callback=cb;const q=new URLSearchParams(params);script.src=API_URL+'?'+q.toString();script.onerror=()=>{cleanup();reject(new Error('Could not connect to Google Apps Script.'))};document.body.appendChild(script)})}
+async function lookup(id){if(!validateConfig())return;if(busy)return;id=String(id||'').trim().toUpperCase();if(!id){showResult('warning','⚠ ENTER ID','Please scan a QR code or enter a Registration ID.');return}busy=true;lookupBtn.disabled=true;lookupBtn.innerHTML='<span class="spinner"></span>CHECKING...';result.innerHTML='';try{const d=await jsonp({action:'lookup',registrationId:id,key:CHECKIN_KEY,checkedInBy:STAFF_NAME});if(d.ok){showResult('valid','✓ PARTICIPANT FOUND',d.message,d.participant,true)}else if(d.code==='ALREADY_CHECKED_IN'){showResult('warning','⚠ ALREADY CHECKED IN',d.message,d.participant,false)}else{showResult('invalid','✕ CHECK-IN REJECTED',d.message,d.participant,false)}}catch(e){showResult('invalid','✕ CONNECTION ERROR',e.message)}finally{busy=false;lookupBtn.disabled=false;lookupBtn.textContent='CHECK PARTICIPANT'}}
+async function checkIn(id){if(busy)return;busy=true;const b=document.getElementById('confirmBtn');if(b){b.disabled=true;b.innerHTML='<span class="spinner"></span>RECORDING...'}try{const d=await jsonp({action:'checkin',registrationId:id,key:CHECKIN_KEY,checkedInBy:STAFF_NAME});if(d.ok){showResult('valid','✓ CHECK-IN SUCCESSFUL','This participant has been checked in.',d.participant,false);regInput.value=''}else if(d.code==='ALREADY_CHECKED_IN'){showResult('warning','⚠ ALREADY CHECKED IN',d.message,d.participant,false)}else{showResult('invalid','✕ CHECK-IN REJECTED',d.message,d.participant,false)}}catch(e){showResult('invalid','✕ CONNECTION ERROR',e.message)}finally{busy=false}}
+scanBtn.onclick=async()=>{if(!validateConfig())return;reader.classList.remove('hidden');stopBtn.classList.remove('hidden');scanBtn.disabled=true;qrScanner=new Html5Qrcode('reader');try{await qrScanner.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:250}},text=>{regInput.value=String(text).trim().toUpperCase();stopCamera();lookup(regInput.value)},()=>{})}catch(e){showResult('invalid','✕ CAMERA ERROR','Unable to open camera. Please make sure this page is HTTPS and allow camera access in your browser.')}};
+async function stopCamera(){if(qrScanner){try{await qrScanner.stop()}catch(e){}try{qrScanner.clear()}catch(e){}qrScanner=null}reader.classList.add('hidden');stopBtn.classList.add('hidden');scanBtn.disabled=false}
+stopBtn.onclick=stopCamera;lookupBtn.onclick=()=>lookup(regInput.value);regInput.addEventListener('keydown',e=>{if(e.key==='Enter')lookup(regInput.value)});
+</script>
+</body>
+</html>
